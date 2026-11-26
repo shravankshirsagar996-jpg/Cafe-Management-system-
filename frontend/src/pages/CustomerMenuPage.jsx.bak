@@ -1,0 +1,386 @@
+import { useEffect, useMemo, useState } from "react";
+import { apiRequest } from "../api/client";
+import { useAuth } from "../context/AuthContext";
+
+const FALLBACK_MENU = [
+  { id: 101, name: "Special Paneer Wrap", category: "Quick Bites", price: 140, desc: "Freshly rolled paneer wrap with spiced sauces", icon: "wrap" },
+  { id: 102, name: "Cold Coffee", category: "Beverages", price: 80, desc: "Chilled creamy cold coffee with rich froth", icon: "coffee" },
+  { id: 103, name: "Veg Cheese Burger", category: "Quick Bites", price: 120, desc: "Crispy patty layered with melted cheese", icon: "burger" },
+  { id: 104, name: "Masala Fries", category: "Quick Bites", price: 90, desc: "Golden fries tossed in house masala blend", icon: "fries" },
+  { id: 105, name: "Hot Cappuccino", category: "Beverages", price: 90, desc: "Espresso topped with steamed milk foam", icon: "cup" },
+  { id: 106, name: "Paneer Pizza", category: "Mains", price: 180, desc: "Loaded paneer chunks, herbs and cheese", icon: "pizza" },
+];
+
+function formatInr(amount) {
+  const num = Number(amount || 0);
+  return "\u20B9" + num.toLocaleString("en-IN", { maximumFractionDigits: 2 });
+}
+
+function DishBadge({ icon }) {
+  return (
+    <div className="w-14 h-14 rounded-2xl bg-[#1c222d] border border-[#d8b467]/45 flex items-center justify-center shrink-0 text-[#f3be52]">
+      {icon === "coffee" || icon === "cup" ? (
+        <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+          <path d="M5 9h11v6a4 4 0 0 1-4 4H9a4 4 0 0 1-4-4V9z" />
+          <path d="M16 10h2a2 2 0 0 1 0 4h-2" />
+          <path d="M8 4v2M12 3v3" />
+        </svg>
+      ) : icon === "pizza" ? (
+        <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+          <path d="M12 3L3 19a18 18 0 0 0 18 0L12 3z" />
+          <circle cx="12" cy="13" r="1.5" fill="currentColor" />
+          <circle cx="9.5" cy="16.5" r="1.2" fill="currentColor" />
+          <circle cx="14.5" cy="16.5" r="1.2" fill="currentColor" />
+        </svg>
+      ) : (
+        <svg className="w-7 h-7" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9">
+          <circle cx="12" cy="12" r="8" />
+          <path d="M8 12h8M12 8v8" />
+        </svg>
+      )}
+    </div>
+  );
+}
+
+export default function CustomerMenuPage() {
+  const { user } = useAuth();
+  const [menuItems, setMenuItems] = useState([]);
+  const [search, setSearch] = useState("");
+  const [category, setCategory] = useState("All");
+  const [tableNo, setTableNo] = useState(user?.table_no || "Table 04");
+  const [cart, setCart] = useState([]);
+  const [myOrders, setMyOrders] = useState([]);
+  const [viewMode, setViewMode] = useState("menu");
+  const [statusMsg, setStatusMsg] = useState("");
+  const [errorMsg, setErrorMsg] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+
+  const loadMenuAndOrders = async () => {
+    try {
+      const [menuRes, ordersRes] = await Promise.all([
+        apiRequest("/api/orders/menu").catch(() => []),
+        apiRequest("/api/orders").catch(() => []),
+      ]);
+      setMenuItems(Array.isArray(menuRes) && menuRes.length ? menuRes : FALLBACK_MENU);
+      setMyOrders(Array.isArray(ordersRes) ? ordersRes.slice(0, 6) : []);
+    } catch (e) {
+      setMenuItems(FALLBACK_MENU);
+    }
+  };
+
+  useEffect(() => {
+    loadMenuAndOrders();
+  }, []);
+
+  const categories = useMemo(() => {
+    const set = new Set(["All", "Quick Bites", "Beverages", "Mains"]);
+    menuItems.forEach((m) => {
+      if (m.category) set.add(m.category);
+    });
+    return Array.from(set);
+  }, [menuItems]);
+
+  const filteredMenu = useMemo(() => {
+    return menuItems.filter((item) => {
+      const matchCat = category === "All" || item.category === category;
+      const matchQuery =
+        !search.trim() ||
+        item.name.toLowerCase().includes(search.trim().toLowerCase()) ||
+        (item.category || "").toLowerCase().includes(search.trim().toLowerCase());
+      return matchCat && matchQuery;
+    });
+  }, [menuItems, category, search]);
+
+  const addItem = (item) => {
+    setStatusMsg("");
+    setErrorMsg("");
+    setCart((prev) => {
+      const idx = prev.findIndex((x) => x.menu_item_id === item.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = { ...copy[idx], quantity: copy[idx].quantity + 1 };
+        return copy;
+      }
+      return [
+        ...prev,
+        {
+          menu_item_id: item.id,
+          name: item.name,
+          price: Number(item.price),
+          quantity: 1,
+        },
+      ];
+    });
+  };
+
+  const changeQty = (menuItemId, delta) => {
+    setCart((prev) =>
+      prev
+        .map((row) =>
+          row.menu_item_id === menuItemId
+            ? { ...row, quantity: row.quantity + delta }
+            : row
+        )
+        .filter((row) => row.quantity > 0)
+    );
+  };
+
+  const subtotal = cart.reduce((sum, row) => sum + row.price * row.quantity, 0);
+  const taxAmount = Math.round(subtotal * 0.05);
+  const grandTotal = subtotal + taxAmount;
+
+  const sendOrderToKitchen = async () => {
+    if (!cart.length) return;
+    setSubmitting(true);
+    setStatusMsg("");
+    setErrorMsg("");
+    try {
+      const payload = {
+        table_no: tableNo || "Table 04",
+        order_type: "dine_in",
+        items: cart.map((c) => ({
+          menu_item_id: c.menu_item_id,
+          quantity: c.quantity,
+        })),
+      };
+      const created = await apiRequest("/api/orders", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      setCart([]);
+      setStatusMsg("Order #" + created.id + " (" + (tableNo || "Table 04") + ") Kitchen la pathavla aahe!");
+      loadMenuAndOrders();
+    } catch (err) {
+      setErrorMsg(err.message || "Backend menu item add kara kinva server check kara.");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 bg-[#28303e] border border-[#d8b467]/50 rounded-full p-1">
+          <button
+            type="button"
+            onClick={() => setViewMode("menu")}
+            className={
+              viewMode === "menu"
+                ? "px-4 py-1.5 rounded-full text-xs font-bold bg-[#f3be52] text-slate-950"
+                : "px-4 py-1.5 rounded-full text-xs font-medium text-slate-200 hover:bg-slate-700/60"
+            }
+          >
+            Menu
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("orders")}
+            className={
+              viewMode === "orders"
+                ? "px-4 py-1.5 rounded-full text-xs font-bold bg-[#f3be52] text-slate-950"
+                : "px-4 py-1.5 rounded-full text-xs font-medium text-slate-200 hover:bg-slate-700/60"
+            }
+          >
+            My Orders ({myOrders.length})
+          </button>
+        </div>
+
+        <div className="text-xs text-slate-300">
+          Customer: <span className="text-[#f3be52] font-semibold">{user?.name || "Guest"}</span>
+        </div>
+      </div>
+
+      {statusMsg && (
+        <div className="bg-emerald-950/70 border border-emerald-500/50 text-emerald-200 px-4 py-3 rounded-2xl text-sm font-medium">
+          {statusMsg}
+        </div>
+      )}
+      {errorMsg && (
+        <div className="bg-rose-950/70 border border-rose-600/60 text-rose-200 px-4 py-3 rounded-2xl text-sm">
+          {errorMsg}
+        </div>
+      )}
+
+      {viewMode === "orders" ? (
+        <div
+          style={{ boxShadow: "0 0 22px rgba(243, 190, 82, 0.16)" }}
+          className="bg-[#28303e] border border-[#d8b467]/65 rounded-3xl p-6 space-y-4"
+        >
+          <h2 className="text-xl font-bold text-white">Recent Orders Status</h2>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {myOrders.map((ord) => (
+              <div
+                key={ord.id}
+                className="bg-[#333c4c] border border-slate-600/50 rounded-2xl p-4 flex items-center justify-between"
+              >
+                <div>
+                  <p className="font-bold text-sm text-white">
+                    Order #{ord.id} • {ord.table_no || "Dine-In"}
+                  </p>
+                  <p className="text-xs text-amber-300 uppercase mt-1">{ord.status}</p>
+                </div>
+                <span className="text-base font-extrabold text-[#f3be52]">
+                  {formatInr(ord.total_amount)}
+                </span>
+              </div>
+            ))}
+            {!myOrders.length && <p className="text-sm text-slate-400">Ajun kontihi order zali nahi.</p>}
+          </div>
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+          <div className="lg:col-span-8 space-y-4">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <div>
+                <h2 className="text-2xl font-bold text-white">Cafe Menu</h2>
+                <p className="text-xs text-slate-300">Select items to place your order</p>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search items..."
+                  className="bg-[#28303e] border border-[#d8b467]/50 focus:border-[#f3be52] outline-none rounded-full px-4 py-1.5 text-xs text-white placeholder:text-slate-400 w-44"
+                />
+                {categories.map((cat) => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setCategory(cat)}
+                    className={
+                      category === cat
+                        ? "px-3.5 py-1.5 rounded-full text-xs font-bold bg-[#f3be52] text-slate-950"
+                        : "px-3.5 py-1.5 rounded-full text-xs font-medium bg-[#28303e] border border-[#d8b467]/40 text-slate-200 hover:bg-slate-700/60"
+                    }
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              {filteredMenu.map((item) => (
+                <div
+                  key={item.id}
+                  style={{ boxShadow: "0 0 18px rgba(243, 190, 82, 0.14)" }}
+                  className="bg-[#28303e] border border-[#d8b467]/60 rounded-3xl p-4 flex items-center justify-between gap-3"
+                >
+                  <div className="flex items-center gap-3.5 min-w-0">
+                    <DishBadge icon={item.icon} />
+                    <div className="min-w-0">
+                      <h3 className="text-base font-bold text-white truncate">{item.name}</h3>
+                      <p className="text-xs text-slate-300/80 line-clamp-1 mt-0.5">
+                        {item.desc || item.category}
+                      </p>
+                      <p className="text-base font-extrabold text-[#f3be52] mt-1.5">
+                        {formatInr(item.price)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => addItem(item)}
+                    className="bg-[#364052] hover:bg-[#f3be52] hover:text-slate-950 text-slate-100 border border-[#d8b467]/50 font-semibold px-4 py-1.5 rounded-full text-xs transition shrink-0"
+                  >
+                    Add
+                  </button>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div
+            style={{ boxShadow: "0 0 24px rgba(243, 190, 82, 0.2)" }}
+            className="lg:col-span-4 bg-[#28303e] border border-[#d8b467]/70 rounded-3xl p-5 space-y-4"
+          >
+            <h3 className="text-xl font-bold text-white">Your Order</h3>
+
+            <div>
+              <label className="block text-xs text-slate-300 mb-1.5">Table Number</label>
+              <select
+                value={tableNo}
+                onChange={(e) => setTableNo(e.target.value)}
+                className="w-full bg-[#1c222d] border border-[#d8b467]/50 rounded-2xl px-4 py-2.5 text-sm font-semibold text-white outline-none"
+              >
+                <option value="Table 01">Table 01</option>
+                <option value="Table 02">Table 02</option>
+                <option value="Table 03">Table 03</option>
+                <option value="Table 04">Table 04</option>
+                <option value="Table 05">Table 05</option>
+                <option value="Table 06">Table 06</option>
+              </select>
+            </div>
+
+            <div className="space-y-2.5">
+              {cart.map((row) => (
+                <div
+                  key={row.menu_item_id}
+                  className="bg-[#333c4c] border border-slate-600/50 rounded-2xl px-3.5 py-2.5 flex items-center justify-between gap-2"
+                >
+                  <div>
+                    <p className="text-sm font-bold text-white">{row.name}</p>
+                    <div className="flex items-center gap-2 mt-1">
+                      <button
+                        type="button"
+                        onClick={() => changeQty(row.menu_item_id, -1)}
+                        className="w-6 h-6 rounded-full bg-[#1c222d] border border-slate-500/60 text-xs font-bold flex items-center justify-center"
+                      >
+                        -
+                      </button>
+                      <span className="text-xs font-semibold text-slate-200">
+                        Qty: {row.quantity}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => changeQty(row.menu_item_id, 1)}
+                        className="w-6 h-6 rounded-full bg-[#1c222d] border border-slate-500/60 text-xs font-bold flex items-center justify-center"
+                      >
+                        +
+                      </button>
+                    </div>
+                  </div>
+                  <span className="text-sm font-extrabold text-white">
+                    {formatInr(row.price * row.quantity)}
+                  </span>
+                </div>
+              ))}
+              {!cart.length && (
+                <p className="text-xs text-slate-400 py-4 text-center">
+                  Menu madhun items Add kara.
+                </p>
+              )}
+            </div>
+
+            <div className="border-t border-slate-600/60 pt-3 space-y-1.5 text-sm">
+              <div className="flex justify-between text-slate-300">
+                <span>Subtotal</span>
+                <span className="font-semibold text-white">{formatInr(subtotal)}</span>
+              </div>
+              <div className="flex justify-between text-slate-300">
+                <span>CGST/SGST (5%):</span>
+                <span className="font-semibold text-white">{formatInr(taxAmount)}</span>
+              </div>
+              <div className="flex justify-between text-base font-extrabold pt-1">
+                <span className="text-white">Total Amount:</span>
+                <span className="text-[#f3be52]">{formatInr(grandTotal)}</span>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              disabled={!cart.length || submitting}
+              onClick={sendOrderToKitchen}
+              style={{ boxShadow: "0 0 18px rgba(243, 190, 82, 0.35)" }}
+              className="w-full bg-gradient-to-r from-[#f6cb67] to-[#e4a63e] hover:from-[#f9d57d] hover:to-[#ebb24c] disabled:opacity-40 text-slate-950 font-extrabold py-3 rounded-full text-sm transition"
+            >
+              {submitting ? "Sending..." : "Send to Kitchen"}
+            </button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,313 @@
+import { useEffect, useState } from "react";
+import { apiRequest } from "../api/client";
+
+function formatInr(amount) {
+  const num = Number(amount || 0);
+  return "\u20B9" + num.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function KpiBadge({ kind }) {
+  if (kind === "sale") {
+    return (
+      <div className="w-12 h-12 rounded-full bg-[#6b4f1d]/75 border border-amber-900/30 flex items-center justify-center shrink-0">
+        <svg className="w-6 h-6 text-amber-200" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M3 9l1.5-5h15L21 9" />
+          <path d="M4 9h16v10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9z" />
+          <path d="M9 20v-5h6v5" />
+        </svg>
+      </div>
+    );
+  }
+  if (kind === "expense") {
+    return (
+      <div className="w-12 h-12 rounded-full bg-[#4a3d28] border border-amber-400/35 flex items-center justify-center shrink-0">
+        <svg className="w-6 h-6 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+          <path d="M9 5h6l-1 3h-4L9 5z" />
+          <path d="M7 11c0-2 2-3 5-3s5 1 5 3v6a3 3 0 0 1-3 3h-4a3 3 0 0 1-3-3v-6z" />
+          <path d="M10.5 13h3M12 13v4" />
+        </svg>
+      </div>
+    );
+  }
+  return (
+    <div className="w-12 h-12 rounded-full bg-[#4a3d28] border border-amber-400/35 flex items-center justify-center shrink-0">
+      <svg className="w-6 h-6 text-amber-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+        <path d="M4 17l5-5 4 3 7-7" />
+        <path d="M16 8h4v4" />
+        <path d="M5 20h14" />
+      </svg>
+    </div>
+  );
+}
+
+export default function OwnerDashboard() {
+  const [summary, setSummary] = useState({
+    today_sales: 0,
+    today_expenses: 0,
+    today_profit: 0,
+    low_stock_count: 0,
+    pending_orders_count: 0,
+  });
+  const [error, setError] = useState("");
+
+  const loadSummary = async () => {
+    try {
+      const data = await apiRequest("/api/dashboard/summary");
+      setSummary(data);
+      setError("");
+    } catch (e) {
+      setError(e.message);
+    }
+  };
+
+  useEffect(() => {
+    loadSummary();
+    const timer = setInterval(loadSummary, 10000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const profitMargin =
+    summary.today_sales > 0
+      ? ((summary.today_profit / summary.today_sales) * 100).toFixed(1)
+      : "0.0";
+
+  const slots = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul"];
+  const maxVal = Math.max(summary.today_sales, summary.today_expenses, 100);
+  const saleRatio = Math.max(25, Math.min(95, Math.round((summary.today_sales / maxVal) * 90)));
+  const expRatio = Math.max(20, Math.min(85, Math.round((summary.today_expenses / maxVal) * 80)));
+
+  const chartSeries = slots.map((label, idx) => {
+    const sFactor = [0.72, 0.56, 0.92, 0.58, 0.76, 0.84, 0.95][idx];
+    const eFactor = [0.45, 0.42, 0.55, 0.36, 0.48, 0.44, 0.52][idx];
+    return {
+      label,
+      salesPct: summary.today_sales > 0 ? Math.max(22, Math.round(saleRatio * sFactor)) : Math.round(78 * sFactor),
+      expPct: summary.today_expenses > 0 ? Math.max(16, Math.round(expRatio * eFactor)) : Math.round(52 * eFactor),
+    };
+  });
+
+  const statusRows = [
+    {
+      label: "Order Menu & Cart:",
+      state: "Active",
+      note: "(Orders \u2192 Kitchen)",
+      stateClass: "text-emerald-400",
+      boxMode: "empty",
+    },
+    {
+      label: "Kitchen Screen:",
+      state: summary.pending_orders_count > 0 ? summary.pending_orders_count + " Pending" : "Online",
+      note: "",
+      stateClass: "text-emerald-400",
+      boxMode: "empty",
+    },
+    {
+      label: "Cash / UPI / Card Billing:",
+      state: "Online",
+      note: "",
+      stateClass: "text-emerald-400",
+      boxMode: "checked",
+    },
+    {
+      label: "Inventory Alerts:",
+      state: summary.low_stock_count + " Low Stock",
+      note: "",
+      stateClass: "text-amber-400",
+      boxMode: "amber",
+    },
+    {
+      label: "Staff Shift:",
+      state: "Ongoing",
+      note: "",
+      stateClass: "text-emerald-400",
+      boxMode: "empty",
+    },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight text-white">Owner Dashboard Overview</h2>
+          <p className="text-sm text-slate-300">Real-time cafe &amp; restaurant performance</p>
+        </div>
+        <button
+          onClick={loadSummary}
+          style={{ boxShadow: "0 0 18px rgba(245, 185, 66, 0.3)" }}
+          className="bg-[#f3be52] hover:bg-[#f7ca6b] text-slate-950 font-bold px-4 py-2 rounded-full text-xs transition"
+        >
+          Refresh Live
+        </button>
+      </div>
+
+      {error && (
+        <div className="bg-rose-950/70 border border-rose-700 text-rose-200 px-4 py-2.5 rounded-2xl text-sm">
+          {error}
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4">
+        <div
+          style={{ boxShadow: "0 0 26px rgba(243, 190, 82, 0.32)" }}
+          className="rounded-3xl p-5 bg-gradient-to-br from-[#f6cb67] via-[#eab14d] to-[#d99b38] text-slate-950 border border-amber-200/80"
+        >
+          <p className="text-sm font-bold text-slate-950/90">Today&rsquo;s Sale</p>
+          <div className="flex items-center gap-3.5 mt-3">
+            <KpiBadge kind="sale" />
+            <div>
+              <p className="text-2xl font-extrabold text-white tracking-tight drop-shadow-sm">
+                {formatInr(summary.today_sales)}
+              </p>
+              <p className="text-xs font-semibold text-slate-950/80 mt-0.5">Live settled bills</p>
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{ boxShadow: "0 0 18px rgba(243, 190, 82, 0.16)" }}
+          className="rounded-3xl p-5 bg-[#28303e] border border-[#d8b467]/70 text-slate-100"
+        >
+          <p className="text-sm font-semibold text-slate-100">Today&rsquo;s Kharcha</p>
+          <div className="flex items-center gap-3.5 mt-3">
+            <KpiBadge kind="expense" />
+            <div>
+              <p className="text-2xl font-extrabold text-[#e8b458] tracking-tight">
+                {formatInr(summary.today_expenses)}
+              </p>
+              <p className="text-xs text-slate-300/85 mt-0.5">Category-wise tracked</p>
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{ boxShadow: "0 0 18px rgba(243, 190, 82, 0.16)" }}
+          className="rounded-3xl p-5 bg-[#28303e] border border-[#d8b467]/70 text-slate-100"
+        >
+          <p className="text-sm font-semibold text-slate-100">Net Profit</p>
+          <div className="flex items-center gap-3.5 mt-3">
+            <KpiBadge kind="profit" />
+            <div>
+              <p className="text-2xl font-extrabold text-white tracking-tight">
+                {formatInr(summary.today_profit)}
+              </p>
+              <p className="text-xs text-slate-300/85 mt-0.5">
+                <span className="text-emerald-400 font-semibold">{profitMargin}%</span> margin today
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div
+          style={{ boxShadow: "0 0 18px rgba(243, 190, 82, 0.16)" }}
+          className="rounded-3xl p-5 bg-[#28303e] border border-[#d8b467]/70 text-slate-100"
+        >
+          <div className="flex items-center justify-between gap-2">
+            <p className="text-sm font-semibold text-slate-100">Low Stock &amp; Alerts</p>
+            <span className="w-6 h-6 rounded-md bg-amber-500/20 border border-amber-400/50 text-amber-400 flex items-center justify-center">
+              <svg className="w-4 h-4" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 3L2 20h20L12 3zm1 14h-2v-2h2v2zm0-4h-2V9h2v4z" />
+              </svg>
+            </span>
+          </div>
+          <div className="mt-3 space-y-1">
+            <p className="text-lg font-bold leading-snug">
+              <span className="text-[#e09362]">{summary.low_stock_count} Low Items</span>{" "}
+              <span className="text-slate-200">&amp;</span>
+            </p>
+            <p className="text-lg font-bold text-[#e8be6b] leading-snug">
+              {summary.pending_orders_count} Pending Orders
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        <div
+          style={{ boxShadow: "0 0 20px rgba(243, 190, 82, 0.14)" }}
+          className="lg:col-span-7 bg-[#28303e] border border-[#d8b467]/65 rounded-3xl p-6 flex flex-col justify-between space-y-5"
+        >
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="text-base font-bold text-white">Sales vs Expenses Overview</h3>
+              <p className="text-xs text-slate-300/80">Performance comparison across periods</p>
+            </div>
+            <div className="flex items-center gap-4 text-xs">
+              <span className="inline-flex items-center gap-1.5 text-amber-200 font-semibold">
+                <span className="w-5 h-3 rounded-sm bg-gradient-to-r from-[#f6cb67] to-[#d99b38] inline-block" /> Sales
+              </span>
+              <span className="inline-flex items-center gap-1.5 text-slate-200 font-medium">
+                <span className="w-5 h-3 rounded-sm bg-[#9a7234] inline-block" /> Expenses
+              </span>
+            </div>
+          </div>
+
+          <div className="h-52 pt-4 border-b border-slate-600/60 flex items-end justify-around gap-3 px-2">
+            {chartSeries.map((col) => (
+              <div key={col.label} className="flex flex-col items-center gap-2 h-full justify-end flex-1">
+                <div className="w-full max-w-[48px] flex items-end justify-center gap-1 h-40">
+                  <div
+                    style={{ height: col.salesPct + "%" }}
+                    className="w-4 rounded-t-sm bg-gradient-to-t from-[#d99b38] to-[#f6cb67] transition-all duration-300"
+                  />
+                  <div
+                    style={{ height: col.expPct + "%" }}
+                    className="w-4 rounded-t-sm bg-[#9a7234] transition-all duration-300"
+                  />
+                </div>
+                <span className="text-[11px] text-slate-300 font-medium">{col.label}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div
+          style={{ boxShadow: "0 0 20px rgba(243, 190, 82, 0.14)" }}
+          className="lg:col-span-5 bg-[#28303e] border border-[#d8b467]/65 rounded-3xl p-6 space-y-4"
+        >
+          <h3 className="text-lg font-bold text-white">System Status &amp; Quick Info</h3>
+
+          <div className="space-y-2.5">
+            {statusRows.map((row) => (
+              <div
+                key={row.label}
+                className="flex items-center justify-between gap-2 bg-[#333c4c] border border-slate-600/50 rounded-xl px-3.5 py-2.5 text-xs"
+              >
+                <div className="flex items-center gap-3">
+                  {row.boxMode === "checked" && (
+                    <span className="w-5 h-5 rounded-md border border-slate-400/70 bg-slate-700/60 text-slate-200 flex items-center justify-center shrink-0">
+                      <svg className="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                        <path d="M5 13l4 4L19 7" />
+                      </svg>
+                    </span>
+                  )}
+                  {row.boxMode === "amber" && (
+                    <span className="w-5 h-5 rounded-md bg-[#5e523c] border border-amber-400/40 shrink-0" />
+                  )}
+                  {row.boxMode === "empty" && (
+                    <span className="w-5 h-5 rounded-md border border-slate-400/60 bg-transparent shrink-0" />
+                  )}
+
+                  <span className="text-slate-100 font-medium">
+                    {row.label}{" "}
+                    {row.note && (
+                      <>
+                        <span className="text-emerald-400 font-semibold">{row.state}</span>{" "}
+                        <span className="text-slate-300">{row.note}</span>
+                      </>
+                    )}
+                  </span>
+                </div>
+
+                {!row.note && (
+                  <span className={"font-semibold whitespace-nowrap " + row.stateClass}>
+                    {row.state}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

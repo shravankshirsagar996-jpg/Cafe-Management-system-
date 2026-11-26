@@ -1,0 +1,6 @@
+
+.cafe-sync-orders.json
+node_modules/
+frontend/node_modules/
+frontend/.cafe-sync-orders.json
+.env

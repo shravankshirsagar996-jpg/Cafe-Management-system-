@@ -1,0 +1,203 @@
+import { useEffect, useState } from "react";
+import { apiRequest } from "../api/client";
+
+const DEMO_KDS_ORDERS = [
+  {
+    id: 104,
+    table_no: "Table 5",
+    order_type: "dine_in",
+    status: "preparing",
+    isDemo: true,
+    items: [
+      { name: "Paneer Tikka Masala", quantity: 1 },
+      { name: "Butter Naan", quantity: 2 },
+      { name: "Jeera Rice", quantity: 1 },
+    ],
+  },
+  {
+    id: 105,
+    table_no: "Table 2",
+    order_type: "dine_in",
+    status: "preparing",
+    isDemo: true,
+    items: [
+      { name: "Veg Biryani", quantity: 2 },
+      { name: "Raita", quantity: 1 },
+      { name: "Tandoori Roti", quantity: 3 },
+    ],
+  },
+  {
+    id: 106,
+    table_no: "Table 12",
+    order_type: "dine_in",
+    status: "pending",
+    isDemo: true,
+    items: [
+      { name: "Butter Chicken", quantity: 1 },
+      { name: "Garlic Naan", quantity: 2 },
+      { name: "Masala Chaas", quantity: 1 },
+    ],
+  },
+  {
+    id: 107,
+    table_no: "Table 8",
+    order_type: "takeaway",
+    status: "preparing",
+    isDemo: true,
+    items: [
+      { name: "Hakka Noodles", quantity: 1 },
+      { name: "Manchurian", quantity: 1 },
+    ],
+  },
+];
+
+function formatOrderType(t) {
+  if (t === "takeaway") return "Takeaway";
+  if (t === "delivery") return "Delivery";
+  return "Dine-in";
+}
+
+export default function KitchenScreen() {
+  const [orders, setOrders] = useState([]);
+  const [usingDemo, setUsingDemo] = useState(false);
+
+  const loadQueue = async () => {
+    const data = await apiRequest("/api/orders/kitchen").catch(() => []);
+    if (Array.isArray(data) && data.length > 0) {
+      setOrders(data);
+      setUsingDemo(false);
+    } else {
+      setOrders(DEMO_KDS_ORDERS);
+      setUsingDemo(true);
+    }
+  };
+
+  useEffect(() => {
+    loadQueue();
+    const timer = setInterval(loadQueue, 4000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const updateStatus = async (order, nextStatus) => {
+    if (order.isDemo) {
+      if (nextStatus === "ready") {
+        setOrders((prev) => prev.filter((x) => x.id !== order.id));
+      } else {
+        setOrders((prev) =>
+          prev.map((x) => (x.id === order.id ? { ...x, status: nextStatus } : x))
+        );
+      }
+      return;
+    }
+
+    await apiRequest("/api/orders/" + order.id + "/status", {
+      method: "PATCH",
+      body: JSON.stringify({ status: nextStatus }),
+    });
+    loadQueue();
+  };
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold tracking-tight text-white">Live Kitchen Screen</h2>
+          <p className="text-sm text-slate-300">Real-time orders and KDS</p>
+        </div>
+
+        <div className="flex items-center gap-2.5">
+          {usingDemo && (
+            <span className="text-[11px] font-semibold px-3 py-1 rounded-full bg-[#28303e] border border-[#d8b467]/50 text-amber-300">
+              Preview Queue
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={loadQueue}
+            style={{ boxShadow: "0 0 16px rgba(243, 190, 82, 0.25)" }}
+            className="bg-[#f3be52] hover:bg-[#f7ca6b] text-slate-950 font-bold px-4 py-1.5 rounded-full text-xs transition"
+          >
+            Refresh KDS
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-5">
+        {orders.map((o) => {
+          const isPreparing = o.status === "preparing";
+          return (
+            <div
+              key={o.id}
+              style={{ boxShadow: "0 0 22px rgba(243, 190, 82, 0.16)" }}
+              className="bg-[#28303e] border border-[#d8b467]/70 rounded-3xl p-5 flex flex-col justify-between space-y-5 min-h-[340px]"
+            >
+              <div className="space-y-3">
+                <div className="flex items-center justify-between gap-2">
+                  <h3 className="text-lg font-extrabold text-white tracking-tight">
+                    Order #{o.id}
+                  </h3>
+                  <span className="px-3 py-1 rounded-full bg-[#3a4252] border border-slate-500/40 text-xs font-bold text-[#f3be52]">
+                    {o.table_no || "Counter"}
+                  </span>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2">
+                  <span className="px-3 py-0.5 rounded-full bg-[#333c4c] border border-slate-500/40 text-xs font-medium text-slate-200">
+                    {formatOrderType(o.order_type)}
+                  </span>
+
+                  {isPreparing ? (
+                    <span
+                      style={{ boxShadow: "0 0 14px rgba(243, 190, 82, 0.35)" }}
+                      className="px-3.5 py-0.5 rounded-full bg-gradient-to-r from-[#f6cb67] to-[#e4a63e] text-slate-950 text-xs font-extrabold"
+                    >
+                      Preparing
+                    </span>
+                  ) : (
+                    <span className="px-3.5 py-0.5 rounded-full bg-slate-200 text-slate-900 text-xs font-extrabold">
+                      New
+                    </span>
+                  )}
+                </div>
+
+                <div className="bg-[#333c4c] border border-slate-600/50 rounded-2xl divide-y divide-slate-600/50 overflow-hidden">
+                  {(o.items || []).map((it, idx) => (
+                    <div
+                      key={idx}
+                      className="px-3.5 py-2.5 text-sm text-slate-100 flex items-center gap-2"
+                    >
+                      <span className="font-bold text-[#f3be52]">{it.quantity}x</span>
+                      <span className="font-medium">{it.name}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2.5 pt-1">
+                <button
+                  type="button"
+                  onClick={() => updateStatus(o, "preparing")}
+                  className={
+                    isPreparing
+                      ? "py-2 rounded-full text-xs font-semibold bg-[#222936] border border-slate-500/60 text-slate-400"
+                      : "py-2 rounded-full text-xs font-semibold bg-[#222936] hover:bg-slate-700 border border-[#d8b467]/60 text-slate-100 transition"
+                  }
+                >
+                  Preparing
+                </button>
+                <button
+                  type="button"
+                  onClick={() => updateStatus(o, "ready")}
+                  style={{ boxShadow: "0 0 14px rgba(243, 190, 82, 0.3)" }}
+                  className="py-2 rounded-full text-xs font-extrabold bg-gradient-to-r from-[#f6cb67] to-[#e4a63e] hover:from-[#f9d57d] hover:to-[#ebb24c] text-slate-950 transition"
+                >
+                  Ready
+                </button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
